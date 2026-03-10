@@ -44,18 +44,32 @@ void printStaffCard(Staff &s)
 
 void AdminSystem::loadAdmins()
 {
-    ifstream file("data/admins.txt");
+    try
+    {
+        ifstream file;
+        file.exceptions(ifstream::failbit | ifstream::badbit);
+        file.open("data/admins.txt");
 
-    string user, password;
-    while (file >> user >> password)
-        admins[user] = password;
+        string user, password;
+
+        while (file >> user >> password)
+            admins[user] = password;
+
+        file.close();
+    }
+    catch (const ios_base::failure &e)
+    {
+        cout << "Error loading admin file: " << e.what() << endl;
+    }
 }
 
 bool AdminSystem::login()
 {
     string user, password;
+
     cout << "Username: ";
     cin >> user;
+
     cout << "Password: ";
     cin >> password;
 
@@ -65,10 +79,12 @@ bool AdminSystem::login()
         cout << "Login Successful\n";
         return true;
     }
+
     SecurityLogger::logEvent("ADMIN LOGIN FAILED " + user);
     cout << "Invalid credentials\n";
     return false;
 }
+
 
 void AdminSystem::initializeIDs(GateSystem &system)
 {
@@ -116,8 +132,13 @@ void AdminSystem::adminMenu(GateSystem &system)
         cout << "16 Live Campus Status\n";
         cout << "17 Logout\n";
 
-        cin >> choice;
-
+        if (!(cin >> choice))
+        {
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(), '\n');
+            cout << "Invalid input\n";
+            continue;
+        }
         switch (choice)
         {
 
@@ -177,13 +198,16 @@ void AdminSystem::adminMenu(GateSystem &system)
 
 void AdminSystem::addStudent(GateSystem &system)
 {
+    cin.ignore(numeric_limits<streamsize>::max(), '\n');
+
     string name, degree, branch;
     int year, batch;
 
     cout << "Name: ";
-    cin >> name;
+    getline(cin, name);
+
     cout << "Degree: ";
-    cin >> degree;
+    getline(cin, degree);
 
     if (!Validation::validDegree(degree))
     {
@@ -192,7 +216,8 @@ void AdminSystem::addStudent(GateSystem &system)
     }
 
     cout << "Branch: ";
-    cin >> branch;
+    getline(cin, branch);
+
     cout << "Year: ";
     cin >> year;
 
@@ -206,14 +231,15 @@ void AdminSystem::addStudent(GateSystem &system)
     cin >> batch;
 
     int id = nextStudentID++;
+
     Student st(id, name, degree, branch, year, batch, false, false);
+
     system.students[id] = st;
     system.saveStudents();
 
-    cout << "Student added successfully\n\n";
+    cout << "Student added successfully\n";
     printStudentCard(st);
 }
-
 void AdminSystem::addStaff(GateSystem &system)
 {
     string name, dept, role;
@@ -257,8 +283,13 @@ void AdminSystem::removeStudent(GateSystem &system)
     cout << "Enter student ID: ";
     cin >> id;
 
-    system.students.erase(id);
-    system.saveStudents();
+    if (system.students.erase(id))
+    {
+        system.saveStudents();
+        cout << "Student removed\n";
+    }
+    else
+        cout << "Student not found\n";
 
     cout << "Student removed\n";
 }
@@ -270,10 +301,13 @@ void AdminSystem::removeStaff(GateSystem &system)
     cout << "Enter staff ID: ";
     cin >> id;
 
-    system.staff.erase(id);
-    system.saveStaff();
+    if(system.staff.erase(id)){
+        cout << "Staff removed\n";
+        system.saveStaff();
+    }
+    else
+        cout << "Staff not founf\n";
 
-    cout << "Staff removed\n";
 }
 
 void AdminSystem::blockUnblock(GateSystem &system)
@@ -342,35 +376,43 @@ void AdminSystem::showVisitors(GateSystem &system)
 
 void AdminSystem::exportCSV()
 {
-    int id;
-    string name, action, reason;
-    long time;
+    try
+    {
+        ifstream file;
+        file.exceptions(ifstream::failbit | ifstream::badbit);
+        file.open("logs/student_logs.txt");
 
-    ifstream s("logs/student_logs.txt");
-    ofstream scsv("reports/students.csv");
+        ofstream out;
+        out.exceptions(ofstream::failbit | ofstream::badbit);
+        out.open("reports/students.csv");
 
-    scsv << "ID,Name,Action,TimeStamp,Reason\n";
+        out << "ID,Name,Action,Timestamp,Reason\n";
 
-    while (s >> id >> name >> action >> time >> reason)
-        scsv << id << "," << name << "," << action << "," << time << "," << reason << "\n";
+        string line;
 
-    ifstream st("logs/staff_logs.txt");
-    ofstream stcsv("reports/staff.csv");
+        while (getline(file, line))
+        {
+            stringstream ss(line);
 
-    stcsv << "ID,Name,Action,TimeStamp,Reason\n";
+            int id;
+            string name, action, reason;
+            long time;
 
-    while (st >> id >> name >> action >> time >> reason)
-        stcsv << id << "," << name << "," << action << "," << time << "," << reason << "\n";
+            ss >> id >> name >> action >> time;
+            getline(ss, reason);
 
-    ifstream v("logs/visitor_logs.txt");
-    ofstream vcsv("reports/visitors.csv");
+            out << id << "," << name << "," << action
+                << "," << time << "," << reason << "\n";
+        }
 
-    vcsv << "ID,Name,Action,TimeStamp,Reason\n";
-
-    while (v >> id >> name >> action >> time >> reason)
-        vcsv << id << "," << name << "," << action << "," << time << "," << reason << "\n";
+        file.close();
+        out.close();
+    }
+    catch (const ios_base::failure &e)
+    {
+        cout << "CSV export error: " << e.what() << endl;
+    }
 }
-
 void AdminSystem::activityTimeline()
 {
     typedef struct
@@ -467,50 +509,76 @@ void AdminSystem ::gateStatistics(GateSystem &system)
     cout << "Visitors Inside : " << visitorsInside << endl;
 }
 
-void AdminSystem ::gateAnalytics()
+void AdminSystem::gateAnalytics()
 {
-    ifstream file("logs/student_logs.txt");
-
-    int id;
-    string name, action, reason;
-    long time;
-    int entries = 0, exits = 0;
-
-    map<int, int> hourActivity;
-
-    while (file >> id >> name >> action >> time >> reason)
+    try
     {
-        tm *t = localtime(&time);
-        int hour = t->tm_hour;
-        hourActivity[hour]++;
-        if (action == "ENTER")
-            entries++;
-        else if (action == "EXIT")
-            exits++;
-    }
-    int peakHour = -1, maxAcitivity = 0;
-
-    for (auto &h : hourActivity)
-    {
-        if (h.second > maxAcitivity)
+        vector<string> files =
         {
-            maxAcitivity = h.second;
-            peakHour = h.first;
+            "logs/student_logs.txt",
+            "logs/staff_logs.txt",
+            "logs/visitor_logs.txt"
+        };
+
+        map<int,int> hourActivity;
+        int entries = 0, exits = 0;
+
+        for (auto &path : files)
+        {
+            ifstream file;
+            file.exceptions(ifstream::failbit | ifstream::badbit);
+            file.open(path);
+
+            int id;
+            string name, action, reason;
+            long time;
+
+            while (file >> id >> name >> action >> time >> reason)
+            {
+                tm *t = localtime(&time);
+
+                hourActivity[t->tm_hour]++;
+
+                if(action == "ENTER") entries++;
+                else if(action == "EXIT") exits++;
+            }
+
+            file.close();
         }
+
+        int peakHour = -1;
+        int maxActivity = 0;
+
+        for (auto &h : hourActivity)
+        {
+            if (h.second > maxActivity)
+            {
+                maxActivity = h.second;
+                peakHour = h.first;
+            }
+        }
+
+        cout << "\n------ GATE ANALYTICS ------\n";
+
+        cout << "Entries Today : " << entries << endl;
+        cout << "Exits Today   : " << exits << endl;
+
+        if (peakHour != -1)
+            cout << "Peak Hour     : "
+                 << peakHour << ":00 - "
+                 << peakHour + 1 << ":00\n";
     }
-
-    cout << "\n------ GATE ANALYTICS ------\n";
-
-    cout << "Entries Today : " << entries << endl;
-    cout << "Exits Today   : " << exits << endl;
-
-    if (peakHour != -1)
-        cout << "Peak Hour     : " << peakHour << ":00 - " << peakHour + 1 << ":00\n";
+    catch (const ios_base::failure &e)
+    {
+        cout << "Analytics file error: " << e.what() << endl;
+    }
 }
 
-void AdminSystem ::liveCampusStatus(GateSystem &system)
+void AdminSystem::liveCampusStatus(GateSystem &system)
 {
-    int studentsInside = 0, staffInside = 0, visitorsInside = 0;
+    int studentsInside = 0;
+    int staffInside = 0;
+    int visitorsInside = 0;
 
     for (auto &s : system.students)
         if (s.second.inside)
